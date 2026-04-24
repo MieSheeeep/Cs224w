@@ -1,0 +1,186 @@
+
+<style>
+  .wrap{font-family:var(--font-sans);color:var(--color-text-primary)}
+  .steps{display:flex;gap:6px;margin:0 0 16px}
+  .step-btn{padding:6px 14px;border-radius:var(--border-radius-md);border:1px solid var(--color-border-tertiary);background:var(--color-background-secondary);color:var(--color-text-secondary);cursor:pointer;font-size:13px;font-family:inherit;transition:all .2s}
+  .step-btn.active{background:#534AB7;color:#fff;border-color:#534AB7}
+  .desc{font-size:14px;line-height:1.7;color:var(--color-text-secondary);margin:0 0 12px;min-height:68px}
+  .desc b{color:var(--color-text-primary);font-weight:500}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin:8px 0 0;font-size:12px;color:var(--color-text-secondary)}
+  .legend-item{display:flex;align-items:center;gap:5px}
+  .legend-dot{width:28px;height:4px;border-radius:2px}
+</style>
+<div class="wrap">
+  <div class="steps" id="steps"></div>
+  <div class="desc" id="desc"></div>
+  <svg width="100%" viewBox="0 0 680 340" id="graph">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+  </svg>
+  <div class="legend" id="legend"></div>
+</div>
+<script>
+const nodes = [
+  {id:'A', x:140, y:80},
+  {id:'B', x:340, y:50},
+  {id:'C', x:540, y:80},
+  {id:'D', x:220, y:240},
+  {id:'E', x:460, y:240},
+];
+
+const allEdges = [
+  {s:'A',t:'B'}, {s:'B',t:'C'}, {s:'A',t:'D'},
+  {s:'B',t:'D'}, {s:'B',t:'E'}, {s:'C',t:'E'},
+  {s:'D',t:'E'},
+];
+
+const steps = [
+  {
+    label: 'Original graph',
+    desc: 'This is the original graph with <b>5 nodes</b> and <b>7 edges</b>. Our goal: predict whether an edge exists between two nodes.',
+    edges: allEdges.map(e=>({...e, color:'#888780', w:1.5, dash:''})),
+    legend: [{color:'#888780', label:'All edges'}],
+    nodeHighlight: {},
+  },
+  {
+    label: 'Step 1: split edges',
+    desc: 'First, split all 7 edges into three disjoint groups. <b>Train edges (4)</b> for learning, <b>val edge (1)</b> for tuning, <b>test edges (2)</b> for final evaluation. These three groups never overlap.',
+    edges: [
+      {s:'A',t:'B', color:'#534AB7', w:2, dash:''},
+      {s:'B',t:'D', color:'#534AB7', w:2, dash:''},
+      {s:'A',t:'D', color:'#534AB7', w:2, dash:''},
+      {s:'C',t:'E', color:'#534AB7', w:2, dash:''},
+      {s:'B',t:'C', color:'#1D9E75', w:2, dash:''},
+      {s:'B',t:'E', color:'#D85A30', w:2, dash:''},
+      {s:'D',t:'E', color:'#D85A30', w:2, dash:''},
+    ],
+    legend: [
+      {color:'#534AB7', label:'Train edges (4)'},
+      {color:'#1D9E75', label:'Val edge (1)'},
+      {color:'#D85A30', label:'Test edges (2)'},
+    ],
+    nodeHighlight: {},
+  },
+  {
+    label: 'Step 2: disjoint split',
+    desc: 'The key step! Within train edges, further split into <b>message passing edges (3)</b> that GNN uses for convolution, and <b>supervision edges (1)</b> that serve as the "exam question". The model CANNOT see the supervision edge when computing embeddings.',
+    edges: [
+      {s:'A',t:'B', color:'#534AB7', w:2.5, dash:''},
+      {s:'B',t:'D', color:'#534AB7', w:2.5, dash:''},
+      {s:'A',t:'D', color:'#534AB7', w:2.5, dash:''},
+      {s:'C',t:'E', color:'#E24B4A', w:2.5, dash:'8 4'},
+      {s:'B',t:'C', color:'#888780', w:1, dash:'4 4'},
+      {s:'B',t:'E', color:'#888780', w:1, dash:'4 4'},
+      {s:'D',t:'E', color:'#888780', w:1, dash:'4 4'},
+    ],
+    legend: [
+      {color:'#534AB7', label:'Message passing edges (model can see)'},
+      {color:'#E24B4A', label:'Supervision edge (the "exam")'},
+      {color:'#888780', label:'Val/test edges (hidden)'},
+    ],
+    nodeHighlight: {},
+  },
+  {
+    label: 'Step 3: training',
+    desc: 'GNN computes embeddings for C and E using only the <b>purple edges</b>. Then the model is asked: "Do C and E have an edge?" Note: C and E have <b>no direct connection</b> in message passing edges, so the model must reason from the graph structure — not cheat.',
+    edges: [
+      {s:'A',t:'B', color:'#534AB7', w:2.5, dash:''},
+      {s:'B',t:'D', color:'#534AB7', w:2.5, dash:''},
+      {s:'A',t:'D', color:'#534AB7', w:2.5, dash:''},
+      {s:'C',t:'E', color:'#E24B4A', w:3, dash:'8 4'},
+    ],
+    legend: [
+      {color:'#534AB7', label:'Message passing (visible to GNN)'},
+      {color:'#E24B4A', label:'"C-E exists?" → model must predict'},
+    ],
+    nodeHighlight: {C:'#E24B4A', E:'#E24B4A'},
+  },
+  {
+    label: 'Contrast: All mode',
+    desc: 'Without disjoint mode: the model uses edge C-E for message passing, embedding of C already contains E\'s info. When asked "Do C and E have an edge?", it trivially says yes — <b>it just saw the answer</b>. This is data leakage.',
+    edges: [
+      {s:'A',t:'B', color:'#534AB7', w:2, dash:''},
+      {s:'B',t:'D', color:'#534AB7', w:2, dash:''},
+      {s:'A',t:'D', color:'#534AB7', w:2, dash:''},
+      {s:'C',t:'E', color:'#E24B4A', w:3, dash:''},
+    ],
+    legend: [
+      {color:'#534AB7', label:'Message passing edges'},
+      {color:'#E24B4A', label:'C-E: used for BOTH passing AND prediction!'},
+    ],
+    nodeHighlight: {C:'#E24B4A', E:'#E24B4A'},
+  },
+];
+
+function render(idx) {
+  const st = steps[idx];
+  document.querySelectorAll('.step-btn').forEach((b,i)=>{
+    b.classList.toggle('active', i===idx);
+  });
+  document.getElementById('desc').innerHTML = st.desc;
+
+  const svg = document.getElementById('graph');
+  while(svg.childNodes.length > 1) svg.removeChild(svg.lastChild);
+
+  const nodeMap = {};
+  nodes.forEach(n => nodeMap[n.id] = n);
+
+  st.edges.forEach(e => {
+    const s = nodeMap[e.s], t = nodeMap[e.t];
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+    line.setAttribute('x2', t.x); line.setAttribute('y2', t.y);
+    line.setAttribute('stroke', e.color);
+    line.setAttribute('stroke-width', e.w);
+    line.setAttribute('stroke-linecap', 'round');
+    if(e.dash) line.setAttribute('stroke-dasharray', e.dash);
+    svg.appendChild(line);
+  });
+
+  nodes.forEach(n => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    const hl = st.nodeHighlight[n.id];
+    circle.setAttribute('cx', n.x); circle.setAttribute('cy', n.y);
+    circle.setAttribute('r', hl ? 22 : 18);
+    circle.setAttribute('fill', hl || 'var(--color-background-secondary)');
+    circle.setAttribute('stroke', hl || 'var(--color-border-primary)');
+    circle.setAttribute('stroke-width', hl ? 2 : 1);
+    g.appendChild(circle);
+
+    const text = document.createElementNS('http://www.w3.org/2000/svg','text');
+    text.setAttribute('x', n.x); text.setAttribute('y', n.y);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('dominant-baseline', 'central');
+    text.setAttribute('font-size', '16px');
+    text.setAttribute('font-weight', '500');
+    text.setAttribute('font-family', 'var(--font-sans)');
+    text.setAttribute('fill', hl ? '#fff' : 'var(--color-text-primary)');
+    text.textContent = n.id;
+    g.appendChild(text);
+    svg.appendChild(g);
+  });
+
+  const leg = document.getElementById('legend');
+  leg.innerHTML = '';
+  st.legend.forEach(l => {
+    const d = document.createElement('div');
+    d.className = 'legend-item';
+    d.innerHTML = `<span class="legend-dot" style="background:${l.color}"></span>${l.label}`;
+    leg.appendChild(d);
+  });
+}
+
+const stepsEl = document.getElementById('steps');
+steps.forEach((s, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'step-btn';
+  btn.textContent = s.label;
+  btn.onclick = () => render(i);
+  stepsEl.appendChild(btn);
+});
+render(0);
+</script>
